@@ -1316,14 +1316,32 @@ KP_EXPORT_SYMBOL(load_ap_package_config);
 
 static void pre_user_exec_init()
 {
-    log_boot("event: %s\n", EXTRA_EVENT_PRE_EXEC_INIT);
+    extra_event_init(EXTRA_EVENT_PRE_EXEC_INIT);
+}
 
+static void post_user_exec_init()
+{
+    extra_event_init(EXTRA_EVENT_POST_EXEC_INIT);
+}
+
+static void pre_init_first_stage()
+{
+    extra_event_init(EXTRA_EVENT_PRE_FIRST_STAGE);
+}
+
+static void post_init_first_stage()
+{
+    extra_event_init(EXTRA_EVENT_POST_FIRST_STAGE);
 }
 
 static void pre_init_second_stage()
 {
-    log_boot("event: %s\n", EXTRA_EVENT_PRE_SECOND_STAGE);
+    extra_event_init(EXTRA_EVENT_PRE_SECOND_STAGE);
+}
 
+static void post_init_second_stage()
+{
+    extra_event_init(EXTRA_EVENT_POST_SECOND_STAGE);
 }
 
 static void on_first_app_process()
@@ -1336,6 +1354,8 @@ static void handle_before_execve(hook_local_t *hook_local, char **__user u_filen
 {
     // unhook flag
     hook_local->data7 = 0;
+    hook_local->data1 = 0;
+    hook_local->data2 = 0;
 
     // Check if current process is trusted manager, set auto-su flag
     if (is_trusted_manager_uid(current_uid())) {
@@ -1363,7 +1383,9 @@ static void handle_before_execve(hook_local_t *hook_local, char **__user u_filen
         if (!first_user_init_executed) {
             first_user_init_executed = 1;
             log_boot("exec first user init: %s\n", filename);
+            pre_init_first_stage();
             pre_user_exec_init();
+            hook_local->data1 = 1;
         }
 
         if (!init_second_stage_executed) {
@@ -1377,6 +1399,7 @@ static void handle_before_execve(hook_local_t *hook_local, char **__user u_filen
                 if (!strcmp(arg, "second_stage") || !strcmp(arg, "--second-stage")) {
                     log_boot("exec %s second stage 0\n", filename);
                     pre_init_second_stage();
+                    hook_local->data2 = 1;
                     init_second_stage_executed = 1;
                 }
             }
@@ -1398,6 +1421,7 @@ static void handle_before_execve(hook_local_t *hook_local, char **__user u_filen
                         (!strcmp(env_value, "1") || !strcmp(env_value, "true"))) {
                         log_boot("exec %s second stage 1\n", filename);
                         pre_init_second_stage();
+                        hook_local->data2 = 1;
                         init_second_stage_executed = 1;
                     }
                 }
@@ -1424,6 +1448,16 @@ static void handle_after_execve(hook_local_t *hook_local, long ret)
     // Auto-su for processes executed by trusted manager
     if (hook_local->data0 && ret >= 0) {
         commit_su(0, all_allow_sctx);
+    }
+
+    if (ret >= 0) {
+        if (hook_local->data1) {
+            post_user_exec_init();
+            post_init_first_stage();
+        }
+        if (hook_local->data2) {
+            post_init_second_stage();
+        }
     }
 
     int unhook = hook_local->data7;
